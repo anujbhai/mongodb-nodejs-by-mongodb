@@ -9,7 +9,35 @@ async function main() {
     await client.connect();
     // await listDatabases(client);
 
-    await printCheapestSuburbs(client, "Australia", "Sydney", 10);
+    // await printCheapestSuburbs(client, "Australia", "Sydney", 10);
+
+    // console.log(createReservationDocuments(
+    //   "Infinite Views",
+    //   [
+    //     new Date("2022-10-31"),
+    //     new Date("2022-11-01")
+    //   ],
+    //   {
+    //     pricePerNight: 180,
+    //     specialRequests: "Late checkout",
+    //     breakfastIncluded: true
+    //   }
+    // ));
+
+    await createReservation(
+      client,
+      "anuj@fekumail.com",
+      "Infinite Views",
+      [
+        new Date("2022-10-31"),
+        new Date("2022-11-01")
+      ],
+      {
+        pricePerNight: 180,
+        specialRequests: "Late checkout",
+        breakfastIncluded: true
+      }
+    );
 
     // await createListing(client, {
     //   name: "A Lovely Loft",
@@ -220,6 +248,78 @@ async function printCheapestSuburbs(client, country, market, maxLimit) {
   await aggcursor.forEach(item => {
     console.log(`${item._id}: ${item.averagePrice}`);
   });
+}
+
+// TRANSACTION FUNCTION
+async function createReservation(client, userEmail, nameOfListing, reservationDates, reservationDetails) {
+  const userCollection = client.db("sample_airbnb").collection("users");
+  const listingsAndReviewsCollections = client.db("sample_airbnb").collection("listingsAndReviews");
+  const reservation = createReservationDocuments(nameOfListing, reservationDates, reservationDetails);
+  const session = client.startSession();
+  const transactionOptions = {
+    readPreference: "primary",
+    readConcern: {level: "local"},
+    writeConcern: {w: "majority"},
+  };
+
+  try {
+    const transactionResult = await session.withTransaction(async () => {
+      const usersUpdateResults = await userCollection.updateOne(
+        {email: userEmail},
+        {$addToSet: {reservations: reservation}},
+        {session}
+      );
+
+      console.log(`${usersUpdateResults.matchedCount} documents found in the users collection with the email address ${userEmail}`);
+      console.log(`${usersUpdateResults.modifiedCount} document(s) was/were updated to include the reservation`);
+
+      const isListingReservedResults = await listingsAndReviewsCollections.findOne({
+        name: nameOfListing,
+        datesReserved: {$in: reservationDates}
+      }, {session});
+
+      if (isListingReservedResults) {
+        await session.abortTransaction();
+        console.error("This listing is already reseved for at least one of the given dates. Reservation could not be created.");
+        console.error("Any operation that already occured as part of this transaction will be rolled back.");
+
+        return;
+      }
+
+      const listingsAndReviewsUpdatesResults = await listingsAndReviewsCollections.updateOne(
+        {name: nameOfListing},
+        {$addToSet: {datesReserved: {$each: reservationDates}}},
+        {session}
+      );
+
+      console.log(`${listingsAndReviewsUpdatesResults.matchedCount} documents found in the listingsAndReviews collection with the name ${nameOfListing}`);
+      console.log(`${listingsAndReviewsUpdatesResults.modifiedCount} document(s) was/were updated to include the reservation`);
+    }, transactionOptions);
+
+    if (transactionResult) {
+      console.log("The reservation was successfully created.");
+    } else {
+      console.log("The transaction was intentionally aborted.");
+    }
+  } catch(err) {
+    console.log("The transaction was aborted due to an unexpected error: ", err);
+  } finally {
+    await session.endSession();
+  }
+}
+
+// HELPER FUNCTION (for transaction)
+function createReservationDocuments(nameOfListing, reservationDates, reservationDetails) {
+  let reservation = {
+    name: nameOfListing,
+    dates: reservationDates
+  };
+
+  for (let detail in reservationDetails) {
+    reservation[detail] = reservationDetails[detail];
+  }
+
+  return reservation;
 }
 
 // LISTING AVAILABLE DBs
