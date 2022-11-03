@@ -10,16 +10,65 @@ async function main() {
         await client.connect();
 
         const operaHouseViews = await createListing(client, {
-
+           name: "Opera House Views",
+           summary: "Beautiful apartment with views of the iconic Sydney Opera House",
+           property_type: "Apartment",
+           bedrooms: 1,
+           bathrooms: 1,
+           beds: 1,
+           address: {
+            market: "Sydney",
+            country: "Australia"
+           } 
         });
 
         const privateRoomInLondon = await createListing(client, {
-
+           name: "Private room in London",
+           property_type: "Apartment",
+           bedrooms: 1,
+           bathrooms: 1,
         });
 
         const beautifulBeachHouse = await createListing(client, {
-
+           name: "Beautiful Beach House",
+           summary: "Enjoy relaxed beach living in this house with a private beach.",
+           bedrooms: 4,
+           bathrooms: 2.5,
+           beds: 1,
+           last_review: new Date()
         });
+
+        await updateListing(client, operaHouseViews, {beds: 2});
+
+        await updateListing(client, beautifulBeachHouse, {
+            address: {
+                market: "Sydney",
+                country: "Australia"
+            }
+        });
+
+        const italianVilla = await createListing(client, {
+           name: "Italian Villa",
+           property_type: "Entire home/apt",
+           bedrooms: 6,
+           bathrooms: 4,
+           address: {
+            market: "Cinque Terre",
+            country: "Italy"
+           } 
+        });
+
+        const sydneyHarbourHome = await createListing(client, {
+           name: "Sydney Harbour Home",
+           bedrooms: 4,
+           bathrooms: 2.5,
+           address: {
+            market: "Sydney",
+            country: "Australia"
+           } 
+        });
+
+        await deleteListing(client, sydneyHarbourHome);
     } finally {
         await client.close();
     }
