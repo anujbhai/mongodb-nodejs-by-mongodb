@@ -1,5 +1,6 @@
 require("dotenv").config();
 const {MongoClient} = require("mongodb");
+const stream = require("stream");
 
 async function main() {
   const uri = process.env.DB_URI;
@@ -8,7 +9,19 @@ async function main() {
   try {
     await client.connect();
 
-    await monitorListingsUsingEventEmitter(client, 15000, )
+    const pipeline = [
+      {
+        "$match": {
+          "operationType": "insert",
+          "fullDocument.address.country": "Australia",
+          "fullDocument.address.market": "Sydney",
+        }
+      }
+    ];
+
+    // await monitorListingsUsingEventEmitter(client, 15000, pipeline);
+    // await monitorListingsUsingHasNext(client, 15000, pipeline);
+    await monitorListingsUsingStreamAPI(client);
   } finally {
     await client.close();
   }
@@ -16,11 +29,6 @@ async function main() {
 
 main().catch(console.error);
 
-/**
- * Close the given change stream after the given amount of time
- * @param {*} timeInMs The amount of time in ms to monitor listings
- * @param {*} changeStream The open change stream that should be closed
- */
 async function closeChangeStream(timeInMs = 6000, changeStream) {
     return new Promise((resolve) => {
         setTimeout(() => {
@@ -31,13 +39,6 @@ async function closeChangeStream(timeInMs = 6000, changeStream) {
     });
 }
 
-/**
- * Monitor listings in the listingsAndReviews collections for changes
- * This function uses the on() function from the EventEmitter class to monitor changes
- * @param {MongoClient} client A MongoClient that is connected to a cluster with the sample_airbnb database
- * @param {Number} timeInMs The amount of time in ms to monitor listings
- * @param {Object} pipeline An aggregation pipeline that determines which change events should be output to the console
- */
 async function monitorListingsUsingEventEmitter(client, timeInMs = 60000, pipeline = []) {
     const collection = client.db("sample_airbnb").collection("listingsAndReviews");
 
@@ -50,20 +51,38 @@ async function monitorListingsUsingEventEmitter(client, timeInMs = 60000, pipeli
     await closeChangeStream(timeInMs, changeStream);
 }
 
-/**
- * Monitor listings in the listingsAndReviews collections for changes
- * This function uses the hasNext() function from the MongoDB Node.js Driver's ChangeStream class to monitor changes
- * @param {MongoClient} client A MongoClient that is connected to a cluster with the sample_airbnb database
- * @param {Number} timeInMs The amount of time in ms to monitor listings
- * @param {Object} pipeline An aggregation pipeline that determines which change events should be output to the console
- */
-async function monitorListingsUsingHasNext() {}
+async function monitorListingsUsingHasNext(client, timeInMs = 60000, pipeline = []) {
+  const collection = client.db("sample_airbnb").collection("listingsAndReviews");
+  const changeStream = collection.watch(pipeline);
 
-/**
- * Monitor listings in the listingsAndReviews collection for changes
- * This function uses the Stream API (https://nodejs.org/api/stream.html) to monitor changes
- * @param {MongoClient} client A MongoClient that is connected to a cluster with the sample_airbnb database
- * @param {Number} timeInMs The amount of time in ms to monitor listings
- * @param {Object} pipeline An aggregation pipeline that determines which change events should be output to the console
- */
-async function monitorListingsUsingStreamAPI() {} 
+  closeChangeStream(timeInMs, changeStream);
+
+  try { 
+    while (await changeStream.hasNext()) {
+      console.log(await changeStream.next());
+    }
+  } catch (error) {
+    if (changeStream.closed) {
+      console.log("The change stream is closed. Will not wait on any more changes");
+    } else {
+      throw error;
+    }
+  }
+}
+
+async function monitorListingsUsingStreamAPI(client, timeInMs = 60000, pipeline = []) {
+  const collection = client.db("sample_airbnb").collection("listingsAndReviews");
+  const changeStream = collection.watch(pipeline);
+
+  changeStream.stream().pipe(
+    new stream.Writable({
+      objectMode: true,
+      write: function (doc, _, cb) {
+        console.log(doc);
+        cb();
+      }
+    })
+  );
+
+  await closeChangeStream(timeInMs, changeStream);
+} 
